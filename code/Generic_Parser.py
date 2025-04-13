@@ -45,6 +45,7 @@ import numpy as np
 from tqdm import tqdm
 import math
 import multiprocessing as mp
+import pandas as pd
 
 """
     Specify File Locations for Generic Parser.py
@@ -57,8 +58,8 @@ TARGET_FILES = r'./data/*/*/*.txt'
 MASTER_DICTIONARY_FILE = r'./LoughranMcDonald_MasterDictionary_2014.csv'
 HARVARD_NEG_FILE = r'./Harvard IV_Negative Word List_Inf.txt'
 
-EXP_SETTING = "LM"
-# EXP_SETTING = "Harvard"
+# EXP_SETTING = "LM"
+EXP_SETTING = "Harvard"
 assert EXP_SETTING in ["LM", "Harvard"]
 
 # # User defined output file
@@ -87,7 +88,7 @@ for word in neg_words:
 
 tf_matrix = [] # (# of documents, # of negative words in lm_dictionary)
 idf_matrix = [] # (# of documents, # of negative words in lm_dictionary)
-doc_length_matrix = [] # (# of documents, 1).
+doc_length_matrix = [] # (# of documents, 1)
 
 
 def processing_doc(doc):
@@ -126,12 +127,14 @@ def process_single_file(filename):
         tf_line, idf_line, doc_length = processing_doc(doc)
         fname = os.path.basename(filename)
         cik = extract_cik_from_filename(fname)
+        file_date = extract_date_from_filename(fname)
         return {
             'tf_line': tf_line,
             'idf_line': idf_line,
             'doc_length': doc_length,
             'filename': fname,
             'cik': cik,
+            'file_date': file_date
         }
     except Exception as e:
         print(f"Error processing {filename}: {e}")
@@ -143,6 +146,7 @@ def process():
     file_list = glob.glob(TARGET_FILES)
     print(f"Total files to process: {len(file_list)}")
     print(f"First few files: {file_list[:3]}")
+    # file_list = file_list[:16]
 
     # Determine the number of processes (use CPU count or a fixed number)
     num_processes = mp.cpu_count()
@@ -157,10 +161,16 @@ def process():
                 results.append(result)
 
     # Collect results into matrices
+    filename_list = []
+    cik_list = []
+    file_date_list = []
     for result in results:
         tf_matrix.append(result['tf_line'])
         idf_matrix.append(result['idf_line'])
         doc_length_matrix.append(result['doc_length'])
+        filename_list.append(result['filename'])
+        cik_list.append(result['cik'])
+        file_date_list.append(result['file_date'])
 
     tf_matrix_np = np.array(tf_matrix, dtype=float)
     idf_matrix_np = np.array(idf_matrix)
@@ -177,14 +187,14 @@ def process():
     idf_vector = np.array([math.log(num_docs / (count + 1)) for count in word_doc_counts])
     # tf-idf
     tfidf_matrix = tf_matrix_normalized * idf_vector
-    tfidf_score = np.sum(tfidf_matrix, axis=1).reshape(-1, 1)
+    tfidf_score = np.sum(tfidf_matrix, axis=1).reshape(-1, 1) # sum of td-idf score of all negative words
     # term weights
     neg_word_counts = np.sum(tf_matrix_np, axis=1).reshape(-1, 1) 
     term_weights = np.zeros_like(neg_word_counts)
     for i in range(len(doc_length_matrix)):
         if doc_length_matrix_np[i, 0] > 0:
             term_weights[i, 0] = neg_word_counts[i, 0] / doc_length_matrix_np[i, 0]
-    return tfidf_score, term_weights
+    return tfidf_score, term_weights, filename_list, cik_list, file_date_list
 
 
 # def get_data(doc):
@@ -217,7 +227,6 @@ def process():
 #     # drop punctuation within numbers for number count
 #     doc = re.sub('(?!=[0-9])(\.|,)(?=[0-9])', '', doc)
 #     doc = doc.translate(str.maketrans(string.punctuation, " " * len(string.punctuation)))
-#     _odata[13] = len(re.findall(r'\b[-+\(]?[$€£]?[-+(]?\d+\)?\b', doc))
 #     _odata[14] = total_syllables / _odata[2]
 #     _odata[15] = word_length / _odata[2]
 #     _odata[16] = len(vdictionary)
@@ -230,11 +239,17 @@ def process():
 #     return _odata
 
 def main():
-    tfidf_score, term_weights = process()
+    tfidf_score, term_weights, filename_list, cik_list, file_date_list = process()
     print(np.shape(tfidf_score))
     print(np.shape(term_weights))
-    np.savetxt(f"./result/{EXP_SETTING}/tfidf_score.csv", tfidf_score, delimiter=",", fmt="%.6f")
-    np.savetxt(f"./result/{EXP_SETTING}/term_weights.csv", term_weights, delimiter=",", fmt="%.6f")
+    df = pd.DataFrame({
+        'tfidf_score': tfidf_score.flatten(),
+        'term_weights': term_weights.flatten(),
+        'filename': filename_list,
+        'cik': cik_list,
+        'file_date': file_date_list
+    })
+    df.to_csv(f"./result/{EXP_SETTING}/result.csv")
         
 
 if __name__ == '__main__':

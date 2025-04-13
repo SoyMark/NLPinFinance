@@ -15,8 +15,8 @@ import requests
 import sys
 import time
 # These modules must be in the same folder as this code (or use a sys.path.append())
-import MOD_EDGAR_Forms  # This module contains some predefined form groups
-import MOD_Download_Utilities as du
+import EDGAR_Forms  # This module contains some predefined form groups
+import Download_Utilities as du
 import pandas as pd
 import json
 

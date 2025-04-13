@@ -1,6 +1,5 @@
 import wrds
 from tqdm import tqdm
-import wrds
 import pandas as pd
 import numpy as np
 from datetime import timedelta, datetime
@@ -8,17 +7,10 @@ from datetime import timedelta, datetime
 def get_excess_returns(cik, release_date, wrds_conn):
     if not release_date:
         return None, None
-    
-    try:
-        cik = int(cik.lstrip('0'))
-    except ValueError:
-        print(f"CIK not valid: {cik}")
-        return None, None
 
     release_date = datetime.strptime(release_date, "%Y-%m-%d")  # Adjust format if needed
-    start_date = release_date - timedelta(days=5)
-    start_date = release_date - timedelta(days=5)  
-    end_date = release_date + timedelta(days=5)
+    start_date = release_date - timedelta(days=10)  # sometimes federal holiday
+    end_date = release_date + timedelta(days=10)
 
     query = f"""
         SELECT a.permno, a.date, a.ret, b.ewretd
@@ -40,10 +32,20 @@ def get_excess_returns(cik, release_date, wrds_conn):
         data['date'] = pd.to_datetime(data['date'])
 
         event_date = pd.to_datetime(release_date)
-        data_3day = data[(data['date'] >= event_date - timedelta(days=1)) &
-                         (data['date'] <= event_date + timedelta(days=1))]
-        data_4day = data[(data['date'] >= event_date - timedelta(days=1)) &
-                         (data['date'] <= event_date + timedelta(days=2))]
+        find_index = -1
+        for index, row in data.iterrows():
+            if row['date'] == event_date:
+                find_index = index
+                break
+        if find_index == -1: # the release date is not a trading day
+            for index, row in data.iterrows():
+                if row['date'] > event_date:
+                    find_index = index
+                    break
+
+        data_3day = data.iloc[find_index-1: find_index+2]
+        data_4day = data.iloc[find_index-1: find_index+3]
+        
         
         def calc_excess_return(df):
             if len(df) < 2: 
@@ -61,32 +63,19 @@ def get_excess_returns(cik, release_date, wrds_conn):
     except Exception as e:
         print(f"fail to query: CIK {cik}, date {release_date}, Error: {e}")
         return None, None
-    
-    
-def extract_cik_from_filename(filename):
-    parts = filename.split('_')
-    if len(parts) >= 5:
-        accession = parts[4]
-        cik = accession.split('-')[0]
-        return cik
-    return None
 
-def extract_date_from_filename(filename):
-    number_date = filename.split('_')[0]
-    return f"{number_date[:4]}-{number_date[4:6]}-{number_date[6:8]}"
-    
 db = wrds.Connection()
 
-excess_returns_3day = []
-excess_returns_4day = []
-
-file_list = [r"20200331_10-Q_edgar_data_940944_0000940944-20-000014_1.txt"]
-
-for filename in tqdm(file_list):
-    cik = extract_cik_from_filename(filename)
-    release_date = extract_date_from_filename(filename)
-    ret_3day, ret_4day = get_excess_returns(cik, release_date, db)
-    excess_returns_3day.append(ret_3day)
-    excess_returns_4day.append(ret_4day)
+for SETTING in ['Harvard', 'LM']:
+    result_file = f"result/{SETTING}/result.csv"
+    df = pd.read_csv(result_file)
+    for index, row in tqdm(df.iterrows()):
+        cik = str(row['cik'])
+        cik = '0' * (10-len(cik)) + cik
+        release_date = row['file_date']
+        ret_3day, ret_4day = get_excess_returns(cik, release_date, db)
+        df.at[index, 'ret_3day'] = ret_3day
+        df.at[index, 'ret_4day'] = ret_4day
+    df.to_csv(f"result/{SETTING}/result_with_excess.csv", index=False)
 
 db.close()
